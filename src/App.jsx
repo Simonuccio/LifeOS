@@ -91,41 +91,6 @@ const formatSeconds = (totalSec) => {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 };
 
-const playSoftPop = () => {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(420, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(720, ctx.currentTime + 0.065);
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.075);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.08);
-  } catch {}
-};
-
-const playTimerBeep = () => {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [523.25, 659.25, 783.99].forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.15);
-      gain.gain.setValueAtTime(0.2, ctx.currentTime + idx * 0.15);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.15 + 0.3);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + idx * 0.15);
-      osc.stop(ctx.currentTime + idx * 0.15 + 0.3);
-    });
-  } catch {}
-};
-
 // Ridimensiona e converte le foto dell'iPhone (HEIC / 48MP) in JPEG leggero con bordo bianco per la lettura del barcode
 const prepareImageForBarcode = (file, maxDim = 1200, addQuietZone = false) =>
   new Promise((resolve, reject) => {
@@ -415,7 +380,7 @@ export default function App() {
   }, [shouldKeepScreenAwake]);
 
   // ==========================================
-  // TIMER DI RECUPERO & FOCUS (ORARIO DI SISTEMA)
+  // TIMER DI RECUPERO & FOCUS (ORARIO DI SISTEMA, SENZA AUDIO)
   // ==========================================
   const startRestCountdown = (seconds) => {
     const sec = Math.max(5, Number(seconds) || 90);
@@ -428,7 +393,12 @@ export default function App() {
       const newEndTime = prev.endTime + deltaSec * 1000;
       const newRemaining = Math.max(0, Math.ceil((newEndTime - Date.now()) / 1000));
       if (newRemaining <= 0) return { active: false, remaining: 90, total: 90, endTime: null };
-      return { ...prev, endTime: newEndTime, remaining: newRemaining };
+      return {
+        ...prev,
+        endTime: newEndTime,
+        remaining: newRemaining,
+        total: Math.max(prev.total, newRemaining)
+      };
     });
   };
 
@@ -437,7 +407,6 @@ export default function App() {
     const syncRest = () => {
       const left = Math.max(0, Math.ceil((restTimer.endTime - Date.now()) / 1000));
       if (left <= 0) {
-        playTimerBeep();
         setRestTimer({ active: false, remaining: 90, total: 90, endTime: null });
       } else {
         setRestTimer((prev) => (prev.remaining !== left ? { ...prev, remaining: left } : prev));
@@ -467,7 +436,6 @@ export default function App() {
     const syncFocus = () => {
       const left = Math.max(0, Math.ceil((focusTimer.endTime - Date.now()) / 1000));
       if (left <= 0) {
-        playTimerBeep();
         triggerConfetti();
         const completedHabit = habits.find((h) => h.id === focusTimer.habitId);
         if (completedHabit) updateHabitProgress(completedHabit, completedHabit.target_value);
@@ -715,7 +683,6 @@ export default function App() {
   const hasCompletedSetInActive = Boolean(
     activeWorkout?.exercises?.some((ex) => ex.sets.some((s) => s.completed))
   );
-  // Giorno ON si attiva solo se hai salvato un allenamento oggi o hai spuntato almeno una serie nella scheda aperta
   const isTrainingDay = workoutsToday.length > 0 || hasCompletedSetInActive;
 
   const currentTargets = {
@@ -750,7 +717,6 @@ export default function App() {
   ).length;
 
   const moveHabitOrder = (habitId, direction, currentDisplayedList) => {
-    playSoftPop();
     const posInDisplayed = currentDisplayedList.findIndex((h) => h.id === habitId);
     const targetPos = posInDisplayed + direction;
     if (posInDisplayed < 0 || targetPos < 0 || targetPos >= currentDisplayedList.length) return;
@@ -772,7 +738,6 @@ export default function App() {
   const targetWaterMl = waterHabit ? Number(waterHabit.target_value) || 2500 : 2500;
 
   const handleWaterUpdate = (newMl) => {
-    playSoftPop();
     if (waterHabit) updateHabitProgress(waterHabit, newMl);
   };
 
@@ -834,7 +799,6 @@ export default function App() {
   }, [totals.kcal, totals.protein, currentTargets.kcal, currentTargets.protein, selectedDate]);
 
   const updateHabitProgress = (habit, newValue) => {
-    playSoftPop();
     const val = Math.max(0, Number(newValue) || 0);
     const completed = val >= Number(habit.target_value || 1);
     const existingIdx = habitLogs.findIndex((l) => l.habit_id === habit.id && l.log_date === selectedDate);
@@ -1056,7 +1020,6 @@ export default function App() {
   };
 
   const toggleSetComplete = (exIndex, setIndex) => {
-    playSoftPop();
     const updated = { ...activeWorkout };
     const exBlock = updated.exercises[exIndex];
     const currentSet = exBlock.sets[setIndex];
@@ -1066,9 +1029,8 @@ export default function App() {
       const bestPast1RM = getHistoricalMax1RM(exBlock.exercise_id);
       if (currentSet.set_type !== 'warmup' && current1RM > bestPast1RM && current1RM > 0) {
         currentSet.is_pr = true;
-        triggerConfetti();
-        setPrBanner(`Nuovo Record Personale su ${exBlock.name}!`);
-        setTimeout(() => setPrBanner(null), 5000);
+        setPrBanner(`Nuovo record • ${exBlock.name}`);
+        setTimeout(() => setPrBanner(null), 3500);
       }
       startRestCountdown(exBlock.rest_seconds || 90);
     } else {
@@ -1078,7 +1040,6 @@ export default function App() {
   };
 
   const setExerciseRpeFeedback = (exIndex, rpeLevel) => {
-    playSoftPop();
     const updated = { ...activeWorkout };
     const exBlock = updated.exercises[exIndex];
     exBlock.rpe_feedback = rpeLevel;
@@ -1326,7 +1287,6 @@ export default function App() {
   };
 
   const logFoodItem = async (foodObj, grams, mealType = foodModal.meal_type) => {
-    playSoftPop();
     const g = Number(grams) || 100;
     const ratio = g / 100;
     const entry = {
@@ -1343,7 +1303,6 @@ export default function App() {
   };
 
   const logDirectMealEntry = async (est, mealType = foodModal.meal_type) => {
-    playSoftPop();
     const entry = {
       id: crypto.randomUUID(),
       log_date: selectedDate,
@@ -1428,6 +1387,7 @@ export default function App() {
 
   const { cardMain, cardSub, pillSurface, pastelPeach, pastelMint, pastelLavender, pastelBlue, pastelRose } = getTheme(darkMode);
   const displayedGoodHabits = showAllDaysHabits ? goodHabitsAll : todaysGoodHabits;
+  const restPct = restTimer.total > 0 ? Math.min(100, Math.max(0, (restTimer.remaining / restTimer.total) * 100)) : 0;
 
   return (
     <div className={`${darkMode ? 'bg-[#121215] text-zinc-100' : 'bg-[#F3EFEA] text-[#18181D]'} min-h-screen pb-32 font-sans transition-colors duration-300`}>
@@ -1448,10 +1408,58 @@ export default function App() {
         </div>
       )}
 
+      {/* Notifica sobria Nuovo Record */}
       {prBanner && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-[#EC4899] to-[#8B5CF6] text-white font-bold px-5 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-bounce">
-          <Trophy className="w-5 h-5" />
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[60] bg-[#18181D]/95 text-zinc-100 border border-white/10 text-xs font-semibold px-4 py-2.5 rounded-2xl shadow-xl backdrop-blur-md flex items-center gap-2.5 tab-animate">
+          <Trophy className="w-4 h-4 text-amber-400 shrink-0" />
           <span>{prBanner}</span>
+        </div>
+      )}
+
+      {/* Timer di Recupero in Primo Piano davanti alla schermata corrente */}
+      {restTimer.active && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-5">
+          <div className={`${cardMain} border rounded-[36px] p-7 w-full max-w-sm shadow-2xl space-y-5 text-center tab-animate`}>
+            <div className="flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-[#F97316]">
+              <Timer className="w-4 h-4" />
+              <span>Recupero Serie</span>
+            </div>
+
+            <p className="text-6xl font-bold tracking-tight font-mono leading-none">
+              {formatSeconds(restTimer.remaining)}
+            </p>
+
+            <div className={`w-full ${darkMode ? 'bg-zinc-800' : 'bg-black/5'} h-2.5 rounded-full overflow-hidden`}>
+              <div
+                style={{ width: `${restPct}%` }}
+                className="h-full rounded-full bg-gradient-to-r from-[#FDBA74] to-[#F97316] transition-all duration-300"
+              />
+            </div>
+
+            <div className="flex items-center justify-center gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => adjustRestCountdown(-15)}
+                className={`px-4 py-2.5 ${cardSub} rounded-full text-xs font-bold cursor-pointer spring-btn`}
+              >
+                -15s
+              </button>
+              <button
+                type="button"
+                onClick={() => adjustRestCountdown(15)}
+                className={`px-4 py-2.5 ${cardSub} rounded-full text-xs font-bold cursor-pointer spring-btn`}
+              >
+                +15s
+              </button>
+              <button
+                type="button"
+                onClick={() => setRestTimer({ active: false, remaining: 90, total: 90, endTime: null })}
+                className="px-6 py-2.5 bg-[#F97316] text-white font-bold rounded-full text-xs cursor-pointer shadow-sm spring-btn"
+              >
+                Salta
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1508,25 +1516,6 @@ export default function App() {
           </div>
         </div>
       </header>
-
-      {restTimer.active && (
-        <div className="max-w-3xl mx-auto px-5 mb-4">
-          <div className={`${pastelPeach} border rounded-[28px] p-4 flex items-center justify-between shadow-lg`}>
-            <div className="flex items-center gap-3">
-              <Timer className="w-5 h-5 text-[#F97316] animate-pulse" />
-              <div>
-                <p className="text-[11px] opacity-75">Recupero Serie</p>
-                <p className="text-2xl font-bold tracking-tight">{formatSeconds(restTimer.remaining)}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => adjustRestCountdown(-15)} className={`px-3 py-1.5 ${pillSurface} rounded-full text-xs font-semibold spring-btn`}>-15s</button>
-              <button onClick={() => adjustRestCountdown(15)} className={`px-3 py-1.5 ${pillSurface} rounded-full text-xs font-semibold spring-btn`}>+15s</button>
-              <button onClick={() => setRestTimer({ active: false, remaining: 90, total: 90, endTime: null })} className="px-4 py-1.5 bg-[#F97316] text-white font-semibold rounded-full text-xs spring-btn">Salta</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <main key={activeTab} className="max-w-3xl mx-auto px-5 pt-2 space-y-5 tab-animate">
         {/* ==========================================
@@ -1737,7 +1726,6 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => {
-                              playSoftPop();
                               setFocusTimer((prev) =>
                                 prev.habitId === h.id
                                   ? { ...prev, habitId: null, running: false, endTime: null }
@@ -2017,7 +2005,7 @@ export default function App() {
         )}
 
         {/* ==========================================
-            TAB 3: PALESTRA (SENZA CRONOMETRO DURATA TOTALE)
+            TAB 3: PALESTRA
            ========================================== */}
         {activeTab === 'forza' && (
           <div className="space-y-5">
@@ -2132,7 +2120,6 @@ export default function App() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    playSoftPop();
                                     const u = { ...activeWorkout };
                                     u.exercises[exIdx].sets = u.exercises[exIdx].sets.map((s) => ({
                                       ...s, weight_kg: overloadTip.nextWeight, reps: overloadTip.nextReps
@@ -2931,7 +2918,7 @@ export default function App() {
           return (
             <button
               key={item.id}
-              onClick={() => { playSoftPop(); setActiveTab(item.id); }}
+              onClick={() => setActiveTab(item.id)}
               className={`px-4 py-2.5 rounded-full text-xs font-bold transition flex items-center gap-2 cursor-pointer spring-btn ${isActive ? item.activeCls : 'text-zinc-400 hover:text-white'}`}
             >
               <IconComponent className="w-4 h-4" />
