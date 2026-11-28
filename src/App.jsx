@@ -276,7 +276,6 @@ export default function App() {
   const [forzaSubTab, setForzaSubTab] = useState('workout');
   const [editingRoutine, setEditingRoutine] = useState(null);
   const [activeWorkout, setActiveWorkout] = useState(null);
-  const [workoutElapsedSec, setWorkoutElapsedSec] = useState(0);
   const [restTimer, setRestTimer] = useState({ active: false, remaining: 90, total: 90, endTime: null });
   const [prBanner, setPrBanner] = useState(null);
 
@@ -302,7 +301,6 @@ export default function App() {
     grams_now: '100', save_for_future: true
   });
 
-  // STATI PER IL NUOVO LETTORE BARCODE COMPATIBILE CON IPHONE
   const [cameraRunning, setCameraRunning] = useState(false);
   const [barcodeStatusMsg, setBarcodeStatusMsg] = useState('');
   const [manualBarcodeInput, setManualBarcodeInput] = useState('');
@@ -417,23 +415,8 @@ export default function App() {
   }, [shouldKeepScreenAwake]);
 
   // ==========================================
-  // TIMER BASATI SU ORARIO DI SISTEMA
+  // TIMER DI RECUPERO & FOCUS (ORARIO DI SISTEMA)
   // ==========================================
-  useEffect(() => {
-    if (!activeWorkout) {
-      setWorkoutElapsedSec(0);
-      return;
-    }
-    const updateElapsed = () => setWorkoutElapsedSec(Math.floor((Date.now() - activeWorkout.startTime) / 1000));
-    updateElapsed();
-    const interval = setInterval(updateElapsed, 1000);
-    document.addEventListener('visibilitychange', updateElapsed);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', updateElapsed);
-    };
-  }, [activeWorkout]);
-
   const startRestCountdown = (seconds) => {
     const sec = Math.max(5, Number(seconds) || 90);
     setRestTimer({ active: true, remaining: sec, total: sec, endTime: Date.now() + sec * 1000 });
@@ -503,7 +486,7 @@ export default function App() {
   }, [focusTimer.running, focusTimer.endTime]);
 
   // ==========================================
-  // NUOVO MOTORE BARCODE (FOTOCAMERA DIRETTA + FOTO RIDIMENSIONATA + CODICE MANUALE)
+  // MOTORE BARCODE (FOTOCAMERA DIRETTA + FOTO RIDIMENSIONATA + CODICE MANUALE)
   // ==========================================
   const stopBarcodeCamera = async () => {
     if (qrInstanceRef.current) {
@@ -537,7 +520,6 @@ export default function App() {
     setBarcodeStatusMsg(`Codice ${cleanCode} letto! Ricerca prodotto in corso...`);
 
     try {
-      // Controlla prima se l'alimento è già salvato nel tuo database personale
       const localMatch = foodsDb.find((f) => f.barcode === cleanCode);
       if (localMatch) {
         await logFoodItem(localMatch, Number(selectedFoodGrams) || 100, foodModal.meal_type);
@@ -575,7 +557,6 @@ export default function App() {
     setBarcodeLoading(false);
   };
 
-  // Avviato direttamente dal tap dell'utente (obbligatorio su iOS Safari per mostrare il popup dei permessi)
   const startBarcodeLiveCamera = async () => {
     setBarcodeStatusMsg('Richiesta permesso fotocamera in corso...');
     await stopBarcodeCamera();
@@ -598,7 +579,7 @@ export default function App() {
         () => {}
       );
       setBarcodeStatusMsg('Inquadra il codice a barre al centro del riquadro.');
-    } catch (err) {
+    } catch {
       setCameraRunning(false);
       setBarcodeStatusMsg(
         'Permesso fotocamera negato o bloccato da Safari. Controlla Impostazioni iPhone > Safari > Fotocamera (imposta su Chiedi o Consenti), oppure usa il pulsante "Carica/Scatta Foto" o inserisci i numeri qui sotto.'
@@ -606,7 +587,6 @@ export default function App() {
     }
   };
 
-  // Analizza una foto convertendo prima il formato iPhone (HEIC / 48MP) in JPEG ottimizzato
   const handleBarcodeImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -616,7 +596,6 @@ export default function App() {
     setBarcodeStatusMsg('Ottimizzazione foto e lettura codice a barre...');
 
     try {
-      // 1. Prova prima con il BarcodeDetector nativo del sistema se disponibile
       if ('BarcodeDetector' in window) {
         try {
           const detector = new window.BarcodeDetector();
@@ -630,7 +609,6 @@ export default function App() {
         } catch {}
       }
 
-      // 2. Converte la foto dell'iPhone in JPEG 1200px e scansiona con Html5Qrcode
       const tempScanner = new Html5Qrcode('barcode-photo-temp');
       try {
         const cleanJpeg = await prepareImageForBarcode(file, 1200, false);
@@ -640,7 +618,6 @@ export default function App() {
         e.target.value = '';
         return;
       } catch {
-        // 3. Secondo tentativo automatico a 900px con bordo bianco ("quiet zone")
         const paddedJpeg = await prepareImageForBarcode(file, 900, true);
         const decodedRetry = await tempScanner.scanFile(paddedJpeg, false);
         tempScanner.clear();
@@ -735,7 +712,11 @@ export default function App() {
   useEffect(() => { handleManualRefresh(false); }, []);
 
   const workoutsToday = workouts.filter((w) => w.workout_date === selectedDate && w.completed);
-  const isTrainingDay = workoutsToday.length > 0 || activeWorkout !== null;
+  const hasCompletedSetInActive = Boolean(
+    activeWorkout?.exercises?.some((ex) => ex.sets.some((s) => s.completed))
+  );
+  // Giorno ON si attiva solo se hai salvato un allenamento oggi o hai spuntato almeno una serie nella scheda aperta
+  const isTrainingDay = workoutsToday.length > 0 || hasCompletedSetInActive;
 
   const currentTargets = {
     kcal: Number(isTrainingDay ? settings.kcal_on : settings.kcal_off) || 2100,
@@ -808,7 +789,7 @@ export default function App() {
 
     const remainingKcal = Math.max(0, currentTargets.kcal - totals.kcal);
     let briefingText = '';
-    if (activeWorkout) {
+    if (activeWorkout && hasCompletedSetInActive) {
       briefingText = `Sessione "${activeWorkout.name}" in corso: usa il selettore RPE a fine esercizio per calibrare i carichi!`;
     } else if (workoutsToday.length > 0) {
       briefingText = `Ottimo lavoro con "${workoutsToday[0].name}"! Il profilo è passato a Giorno ON (${currentTargets.kcal} kcal).`;
@@ -1040,10 +1021,8 @@ export default function App() {
     setActiveWorkout({
       routine_id: routine ? routine.id : null,
       name: routine ? routine.name : 'Allenamento Libero',
-      startTime: Date.now(),
       exercises: workoutExercises
     });
-    setWorkoutElapsedSec(0);
     setActiveTab('forza');
     setForzaSubTab('workout');
   };
@@ -1118,10 +1097,9 @@ export default function App() {
   const finishAndSaveWorkout = async () => {
     if (!activeWorkout) return;
     triggerConfetti();
-    const durationMin = Math.max(1, Math.round((Date.now() - activeWorkout.startTime) / 60000));
     const newWorkoutObj = {
       id: crypto.randomUUID(), routine_id: activeWorkout.routine_id, name: activeWorkout.name,
-      workout_date: selectedDate, duration_minutes: durationMin, completed: true, created_at: new Date().toISOString()
+      workout_date: selectedDate, duration_minutes: 0, completed: true, created_at: new Date().toISOString()
     };
     const setsToInsert = [];
     activeWorkout.exercises.forEach((ex) => {
@@ -1426,7 +1404,7 @@ export default function App() {
   const todaysWorkoutIds = new Set(workoutsToday.map((w) => w.id));
   const todaysCompletedSets = allWorkoutSets.filter((s) => todaysWorkoutIds.has(s.workout_id) && s.completed);
   const todaysExercisesSummary = [];
-  if (activeWorkout && activeWorkout.exercises.length > 0) {
+  if (activeWorkout && hasCompletedSetInActive && activeWorkout.exercises.length > 0) {
     activeWorkout.exercises.forEach((ex) => {
       todaysExercisesSummary.push({
         name: ex.name,
@@ -2039,7 +2017,7 @@ export default function App() {
         )}
 
         {/* ==========================================
-            TAB 3: PALESTRA (MULTI-MUSCOLO + MAPPA ANATOMICA)
+            TAB 3: PALESTRA (SENZA CRONOMETRO DURATA TOTALE)
            ========================================== */}
         {activeTab === 'forza' && (
           <div className="space-y-5">
@@ -2090,12 +2068,10 @@ export default function App() {
                     <div className={`${pastelPeach} border rounded-[32px] p-6 space-y-4 shadow-md`}>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <span className="px-3 py-0.5 rounded-full bg-[#F97316] text-white text-[10px] font-bold uppercase">Palestra Live • Giorno ON</span>
+                          <span className="px-3 py-0.5 rounded-full bg-[#F97316] text-white text-[10px] font-bold uppercase">
+                            {hasCompletedSetInActive ? 'Allenamento in Corso • Giorno ON' : 'Scheda Aperta'}
+                          </span>
                           <h2 className="text-2xl font-bold mt-1.5">{activeWorkout.name}</h2>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-3xl font-bold tracking-tight font-mono">{formatSeconds(workoutElapsedSec)}</p>
-                          <p className="text-[11px] opacity-75">Durata sessione</p>
                         </div>
                       </div>
 
@@ -2108,7 +2084,7 @@ export default function App() {
                           ))}
                         </div>
                         <div className="flex gap-2">
-                          <button onClick={() => setActiveWorkout(null)} className={`px-4 py-2 rounded-full ${pillSurface} text-xs opacity-75`}>Annulla</button>
+                          <button onClick={() => setActiveWorkout(null)} className={`px-4 py-2 rounded-full ${pillSurface} text-xs opacity-75 cursor-pointer spring-btn`}>Chiudi</button>
                           <button onClick={finishAndSaveWorkout} className="px-5 py-2 rounded-full bg-[#10B981] text-white font-bold text-xs cursor-pointer shadow-sm spring-btn">Termina e Salva</button>
                         </div>
                       </div>
@@ -2297,7 +2273,7 @@ export default function App() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <h2 className="text-xl font-bold">Schede Palestra & Archivio Esercizi</h2>
-                        <p className="text-xs text-zinc-400">Avvia o modifica una scheda già creata</p>
+                        <p className="text-xs text-zinc-400">Apri o modifica una scheda già creata</p>
                       </div>
                       <div className="flex gap-2">
                         <button onClick={openCreateExerciseModal} className={`px-4 py-2 rounded-full ${cardSub} text-xs font-bold cursor-pointer spring-btn`}>
@@ -2314,10 +2290,10 @@ export default function App() {
                         <div>
                           <span className="px-2.5 py-0.5 rounded-full bg-[#F97316] text-white text-[10px] font-bold">Libero</span>
                           <h3 className="font-bold text-base mt-2">Sessione Libera</h3>
-                          <p className="text-xs opacity-75 mt-1">Scegli gli esercizi man mano con cronometro e feedback RPE.</p>
+                          <p className="text-xs opacity-75 mt-1">Scegli gli esercizi man mano con recupero automatico e feedback RPE.</p>
                         </div>
                         <button onClick={() => startWorkout(null)} className="mt-5 w-full py-3 rounded-full bg-[#18181D] text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer spring-btn">
-                          <Play className="w-3.5 h-3.5" /> Avvia Ora
+                          <Play className="w-3.5 h-3.5" /> Apri Sessione
                         </button>
                       </div>
 
@@ -2347,7 +2323,7 @@ export default function App() {
                             </p>
                           </div>
                           <button onClick={() => startWorkout(r)} className="mt-5 w-full py-3 rounded-full bg-[#F97316] text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer spring-btn">
-                            <Play className="w-3.5 h-3.5" /> Avvia Scheda
+                            <Play className="w-3.5 h-3.5" /> Apri Scheda
                           </button>
                         </div>
                       ))}
@@ -2581,7 +2557,7 @@ export default function App() {
         )}
 
         {/* ==========================================
-            TAB 4: DIETA (CON NUOVO BARCODE PER IPHONE)
+            TAB 4: DIETA (CON BARCODE PER IPHONE)
            ========================================== */}
         {activeTab === 'mfp' && (
           <div className="space-y-5">
@@ -2862,11 +2838,9 @@ export default function App() {
                           </div>
                         </>
                       ) : (
-                        /* NUOVA SEZIONE BARCODE COMPATIBILE CON IPHONE E FOTO AD ALTA RISOLUZIONE */
                         <div className="space-y-3">
                           <div id="barcode-photo-temp" className="hidden" />
 
-                          {/* 1. Pulsanti Azione Diretta: Fotocamera Live & Foto Ottimizzata */}
                           <div className="grid grid-cols-2 gap-2.5">
                             {!cameraRunning ? (
                               <button
@@ -2900,20 +2874,17 @@ export default function App() {
                             </label>
                           </div>
 
-                          {/* Riquadro Video Fotocamera Live */}
                           <div
                             id="barcode-live-box"
                             className={`rounded-3xl overflow-hidden ${cameraRunning ? `${cardSub} p-2 min-h-[220px]` : 'hidden'}`}
                           />
 
-                          {/* Messaggio di Stato o Istruzioni Permessi */}
                           {barcodeStatusMsg && (
                             <div className={`p-3 rounded-2xl text-xs font-semibold ${pastelLavender} border`}>
                               {barcodeLoading ? '⏳ ' : 'ℹ️ '}{barcodeStatusMsg}
                             </div>
                           )}
 
-                          {/* 2. Inserimento Manuale Codice a 13 cifre (Alternativa Infallibile) */}
                           <div className={`${cardSub} p-3.5 rounded-2xl space-y-2`}>
                             <label className="text-zinc-400 block font-semibold">
                               Oppure digita i numeri sotto al codice a barre (es. 8076800195057):
