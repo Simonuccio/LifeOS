@@ -24,7 +24,7 @@ React · Vite · Tailwind CSS · Supabase (autenticazione e database PostgreSQL)
 Servono [Node.js](https://nodejs.org/) e un progetto [Supabase](https://supabase.com/) tuo.
 
 ```
-git clone https://github.com/<tuo-username>/LifeOS.git
+git clone https://github.com/Simonuccio/LifeOS.git
 cd LifeOS
 npm install
 ```
