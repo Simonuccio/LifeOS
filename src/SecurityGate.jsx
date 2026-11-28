@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { Lock, ShieldCheck, Delete, LogOut, KeyRound } from 'lucide-react';
+import { Lock, ShieldCheck, Delete, KeyRound } from 'lucide-react';
 
 export default function SecurityGate({ children }) {
   const [session, setSession] = useState(null);
@@ -12,9 +12,11 @@ export default function SecurityGate({ children }) {
   const [authError, setAuthError] = useState('');
   const [loadingLogin, setLoadingLogin] = useState(false);
 
-  // Stato Tastierino PIN Rapido a 4 cifre
+  // Stato Tastierino PIN Rapido a 4 cifre (salvato per dispositivo)
   const [savedPin, setSavedPin] = useState(() => localStorage.getItem('lifeos_quick_pin') || '');
-  const [isPinUnlocked, setIsPinUnlocked] = useState(false);
+  const [isPinUnlocked, setIsPinUnlocked] = useState(
+    () => Boolean(localStorage.getItem('lifeos_quick_pin')) && localStorage.getItem('lifeos_pin_unlocked') === 'true'
+  );
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
@@ -49,13 +51,14 @@ export default function SecurityGate({ children }) {
     setPinError(false);
 
     if (nextPin.length === 4) {
-      // Se non esiste ancora un PIN salvato, lo imposta ora
       if (!savedPin) {
         localStorage.setItem('lifeos_quick_pin', nextPin);
+        localStorage.setItem('lifeos_pin_unlocked', 'true');
         setSavedPin(nextPin);
         setIsPinUnlocked(true);
         setPinInput('');
       } else if (nextPin === savedPin) {
+        localStorage.setItem('lifeos_pin_unlocked', 'true');
         setIsPinUnlocked(true);
         setPinInput('');
       } else {
@@ -65,9 +68,15 @@ export default function SecurityGate({ children }) {
     }
   };
 
+  const handleLockNow = () => {
+    localStorage.removeItem('lifeos_pin_unlocked');
+    setIsPinUnlocked(false);
+  };
+
   const handleLogoutFull = async () => {
     if (!confirm('Vuoi disconnettere la sessione Cloud e reimpostare il PIN su questo dispositivo?')) return;
     localStorage.removeItem('lifeos_quick_pin');
+    localStorage.removeItem('lifeos_pin_unlocked');
     setSavedPin('');
     setIsPinUnlocked(false);
     await supabase.auth.signOut();
@@ -149,7 +158,7 @@ export default function SecurityGate({ children }) {
     );
   }
 
-  // 2. SCHERMATA TASTIERINO PIN RAPIDO A 4 CIFRE (Ad ogni apertura dell'app)
+  // 2. SCHERMATA TASTIERINO PIN (Una sola volta per dispositivo, o dopo blocco manuale)
   if (!isPinUnlocked) {
     return (
       <div className="min-h-screen bg-[#18181D] text-white flex flex-col items-center justify-center p-6 font-sans select-none">
@@ -164,7 +173,7 @@ export default function SecurityGate({ children }) {
             </h2>
             <p className="text-xs text-zinc-400 mt-1">
               {savedPin
-                ? 'Sblocco rapido per accedere a LifeOS'
+                ? 'Inseriscilo una sola volta per ricordare questo dispositivo'
                 : 'Scegli 4 cifre per proteggere la schermata su questo dispositivo'}
             </p>
           </div>
@@ -192,7 +201,7 @@ export default function SecurityGate({ children }) {
             <p className="text-xs text-[#F26B3A] font-semibold">PIN errato, riprova</p>
           )}
 
-          {/* Tastierino Numerico Stile iOS / TimeZen */}
+          {/* Tastierino Numerico */}
           <div className="grid grid-cols-3 gap-3.5 pt-2">
             {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
               <button
@@ -240,7 +249,7 @@ export default function SecurityGate({ children }) {
     <div className="relative">
       {children}
       <button
-        onClick={() => setIsPinUnlocked(false)}
+        onClick={handleLockNow}
         title="Blocca subito l'app con PIN"
         className="fixed bottom-5 right-4 z-40 w-10 h-10 rounded-full bg-[#18181D] text-zinc-300 hover:text-white shadow-xl flex items-center justify-center cursor-pointer border border-white/10"
       >
